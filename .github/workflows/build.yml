@@ -1,4 +1,4 @@
-name: Build APK - One File Builder V2
+name: Build APK V3 Clean
 
 on:
   push:
@@ -19,40 +19,34 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Gradle 8.5
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: 8.5
-
-      - name: Create project files
+      - name: Clean entire repo junk
         run: |
-          rm -rf app 2>/dev/null || true
+          rm -rf app .gradle gradle gradlew gradlew.bat .idea build
+          rm -rf README_PURE* || true
           mkdir -p app/src/main/java/com/xautrader/pure
-          mkdir -p app/src/main
-          
+
           cat > settings.gradle.kts <<'EOF'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
           dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
           rootProject.name = "XAUTraderPureAndroid"
           include(":app")
           EOF
-          
+
           cat > build.gradle.kts <<'EOF'
           plugins { id("com.android.application") version "8.2.2" apply false; id("org.jetbrains.kotlin.android") version "1.9.22" apply false }
           EOF
-          
+
           cat > gradle.properties <<'EOF'
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
-          android.nonTransitiveRResources=true
           EOF
-          
+
           cat > app/build.gradle.kts <<'EOF'
           plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
           android {
               namespace = "com.xautrader.pure"
               compileSdk = 34
-              defaultConfig { applicationId = "com.xautrader.pure"; minSdk = 24; targetSdk = 34; versionCode = 5; versionName = "5.0-OANDA-FREE" }
+              defaultConfig { applicationId = "com.xautrader.pure"; minSdk = 24; targetSdk = 34; versionCode = 6; versionName = "6.0-FIXED" }
               buildTypes { release { isMinifyEnabled = false } }
               compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = "17" }
@@ -68,7 +62,7 @@ jobs:
               implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
           }
           EOF
-          
+
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -80,7 +74,7 @@ jobs:
               </application>
           </manifest>
           EOF
-          
+
           cat > app/src/main/java/com/xautrader/pure/MainActivity.kt <<'KOTLIN_EOF'
           package com.xautrader.pure
           import android.os.Bundle
@@ -95,32 +89,31 @@ jobs:
           import okhttp3.*
           import org.json.JSONObject
           class MainActivity : ComponentActivity() {
-              override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { XAUTraderApp() } }
+              override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { App() } }
           }
           @OptIn(ExperimentalMaterial3Api::class)
           @Composable
-          fun XAUTraderApp() {
+          fun App() {
               var token by remember { mutableStateOf("") }
               var accountId by remember { mutableStateOf("") }
-              var log by remember { mutableStateOf("OANDA FREE\nReady\n") }
               var balance by remember { mutableStateOf("0.0") }
+              var log by remember { mutableStateOf("OANDA FREE READY\n") }
               val scope = rememberCoroutineScope()
               val client = remember { OkHttpClient() }
-              fun addLog(s: String) { log = (s + "\n" + log).take(4000) }
-              Scaffold(topBar = { TopAppBar(title = { Text("XAU Trader OANDA FREE") }) }) { pad ->
-                  Column(Modifier.padding(pad).padding(16.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                      OutlinedTextField(token, { token = it }, label = { Text("OANDA Token") }, modifier = Modifier.fillMaxWidth())
+              Scaffold(topBar = { TopAppBar(title = { Text("XAU OANDA FREE") }) }) { p ->
+                  Column(Modifier.padding(p).padding(16.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                      OutlinedTextField(token, { token = it }, label = { Text("Token") }, modifier = Modifier.fillMaxWidth())
                       OutlinedTextField(accountId, { accountId = it }, label = { Text("Account ID") }, modifier = Modifier.fillMaxWidth())
                       Text("Balance: $balance")
                       Button(onClick = {
                           scope.launch(Dispatchers.IO) {
                               try {
                                   val req = Request.Builder().url("https://api-fxpractice.oanda.com/v3/accounts/${accountId}").header("Authorization", "Bearer $token").build()
-                                  client.newCall(req).execute().use { r ->
+                                  client.newCall(req).execute().use { r -> 
                                       val b = r.body?.string() ?: ""
-                                      if (r.isSuccessful) { val bal = JSONObject(b).getJSONObject("account").getString("balance"); balance = bal; addLog("Balance: $bal") } else addLog(b)
+                                      if (r.isSuccessful) { val bal = JSONObject(b).getJSONObject("account").getString("balance"); balance = bal; log = "Balance: $bal\n" + log } else log = b + "\n" + log
                                   }
-                              } catch (e: Exception) { addLog(e.message ?: "err") }
+                              } catch (e: Exception) { log = (e.message ?: "err") + "\n" + log }
                           }
                       }) { Text("Check Balance") }
                       Card(Modifier.weight(1f).fillMaxWidth()) { Text(log, Modifier.padding(10.dp)) }
@@ -128,18 +121,16 @@ jobs:
               }
           }
           KOTLIN_EOF
+          ls -R
 
-      - name: Generate Gradle Wrapper
-        run: gradle wrapper --gradle-version 8.5
-
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
-
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
+      - name: Build with Gradle
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: 8.5
+          arguments: assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: XAUTrader-APK-FIXED
+          name: XAUTrader-APK-V3
           path: app/build/outputs/apk/debug/app-debug.apk
