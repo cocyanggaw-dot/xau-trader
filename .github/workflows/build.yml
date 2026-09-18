@@ -1,4 +1,4 @@
-name: Build APK V3 Clean
+name: Build APK V4 Final
 
 on:
   push:
@@ -19,34 +19,32 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Clean entire repo junk
+      - name: Build project with Python (no bash bug)
+        shell: python
         run: |
-          rm -rf app .gradle gradle gradlew gradlew.bat .idea build
-          rm -rf README_PURE* || true
-          mkdir -p app/src/main/java/com/xautrader/pure
-
-          cat > settings.gradle.kts <<'EOF'
+          import os, textwrap
+          os.system("rm -rf app .gradle gradle build")
+          os.makedirs("app/src/main/java/com/xautrader/pure", exist_ok=True)
+          
+          open("settings.gradle.kts","w").write(textwrap.dedent("""
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
           dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
           rootProject.name = "XAUTraderPureAndroid"
           include(":app")
-          EOF
+          """))
 
-          cat > build.gradle.kts <<'EOF'
+          open("build.gradle.kts","w").write(textwrap.dedent("""
           plugins { id("com.android.application") version "8.2.2" apply false; id("org.jetbrains.kotlin.android") version "1.9.22" apply false }
-          EOF
+          """))
 
-          cat > gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-          android.useAndroidX=true
-          EOF
+          open("gradle.properties","w").write("org.gradle.jvmargs=-Xmx2048m\nandroid.useAndroidX=true\n")
 
-          cat > app/build.gradle.kts <<'EOF'
+          open("app/build.gradle.kts","w").write(textwrap.dedent("""
           plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
           android {
               namespace = "com.xautrader.pure"
               compileSdk = 34
-              defaultConfig { applicationId = "com.xautrader.pure"; minSdk = 24; targetSdk = 34; versionCode = 6; versionName = "6.0-FIXED" }
+              defaultConfig { applicationId = "com.xautrader.pure"; minSdk = 24; targetSdk = 34; versionCode = 7; versionName = "7.0-FINAL" }
               buildTypes { release { isMinifyEnabled = false } }
               compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = "17" }
@@ -61,10 +59,9 @@ jobs:
               implementation("com.squareup.okhttp3:okhttp:4.12.0")
               implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
           }
-          EOF
+          """))
 
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
+          open("app/src/main/AndroidManifest.xml","w").write(textwrap.dedent("""<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET"/>
               <application android:label="XAU Trader" android:theme="@android:style/Theme.Material.Light">
@@ -73,9 +70,9 @@ jobs:
                   </activity>
               </application>
           </manifest>
-          EOF
+          """))
 
-          cat > app/src/main/java/com/xautrader/pure/MainActivity.kt <<'KOTLIN_EOF'
+          main_code = '''
           package com.xautrader.pure
           import android.os.Bundle
           import androidx.activity.ComponentActivity
@@ -97,33 +94,38 @@ jobs:
               var token by remember { mutableStateOf("") }
               var accountId by remember { mutableStateOf("") }
               var balance by remember { mutableStateOf("0.0") }
-              var log by remember { mutableStateOf("OANDA FREE READY\n") }
+              var log by remember { mutableStateOf("OANDA FREE READY\\nPaste token and ID\\n") }
               val scope = rememberCoroutineScope()
               val client = remember { OkHttpClient() }
               Scaffold(topBar = { TopAppBar(title = { Text("XAU OANDA FREE") }) }) { p ->
                   Column(Modifier.padding(p).padding(16.dp).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                      OutlinedTextField(token, { token = it }, label = { Text("Token") }, modifier = Modifier.fillMaxWidth())
+                      OutlinedTextField(token, { token = it }, label = { Text("OANDA Token") }, modifier = Modifier.fillMaxWidth())
                       OutlinedTextField(accountId, { accountId = it }, label = { Text("Account ID") }, modifier = Modifier.fillMaxWidth())
-                      Text("Balance: $balance")
+                      Text("Balance: " + balance)
                       Button(onClick = {
                           scope.launch(Dispatchers.IO) {
                               try {
-                                  val req = Request.Builder().url("https://api-fxpractice.oanda.com/v3/accounts/${accountId}").header("Authorization", "Bearer $token").build()
-                                  client.newCall(req).execute().use { r -> 
+                                  val url = "https://api-fxpractice.oanda.com/v3/accounts/" + accountId
+                                  val req = Request.Builder().url(url).header("Authorization", "Bearer " + token).build()
+                                  client.newCall(req).execute().use { r ->
                                       val b = r.body?.string() ?: ""
-                                      if (r.isSuccessful) { val bal = JSONObject(b).getJSONObject("account").getString("balance"); balance = bal; log = "Balance: $bal\n" + log } else log = b + "\n" + log
+                                      if (r.isSuccessful) {
+                                          val bal = JSONObject(b).getJSONObject("account").getString("balance")
+                                          balance = bal
+                                          log = "Balance: " + bal + "\\n" + log
+                                      } else { log = b + "\\n" + log }
                                   }
-                              } catch (e: Exception) { log = (e.message ?: "err") + "\n" + log }
+                              } catch (e: Exception) { log = (e.message ?: "err") + "\\n" + log }
                           }
                       }) { Text("Check Balance") }
                       Card(Modifier.weight(1f).fillMaxWidth()) { Text(log, Modifier.padding(10.dp)) }
                   }
               }
           }
-          KOTLIN_EOF
-          ls -R
+          '''
+          open("app/src/main/java/com/xautrader/pure/MainActivity.kt","w").write(main_code)
 
-      - name: Build with Gradle
+      - name: Build APK
         uses: gradle/gradle-build-action@v3
         with:
           gradle-version: 8.5
@@ -132,5 +134,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: XAUTrader-APK-V3
+          name: XAUTrader-APK-V4
           path: app/build/outputs/apk/debug/app-debug.apk
